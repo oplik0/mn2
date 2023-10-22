@@ -1,0 +1,61 @@
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+name: release-please
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v3
+        - name: Install poetry
+          run: pipx install poetry
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: "3.10"
+            cache: "poetry"
+        - name: Install dependencies
+          run: poetry install
+        - name: build
+          run: poetry run ./build.py
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release-url: ${{ steps.release.outputs.release_url }}
+      upload-url: ${{ steps.release.outputs.upload_url }}
+      release-created: ${{ steps.release.outputs.release_created }}
+    steps:
+      - uses: google-github-actions/release-please-action@v3
+        id: release
+        with:
+          release-type: python
+          package-name: "mn2"
+  build:
+    if: ${{ needs.release-please.outputs.release-created }}
+    name: Build
+    runs-on: ubuntu-latest
+    needs: release-please
+    steps:
+        - uses: actions/checkout@v3
+        - name: Install poetry
+          run: pipx install poetry
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: "3.10"
+            cache: "poetry"
+        - name: Install dependencies
+          run: poetry install
+        - name: build
+          run: poetry run ./build.py
+        - uses: shogo82148/actions-upload-release-asset@v1
+          with:
+            upload_url: ${{ needs.release-please.outputs.upload-url }}
+            asset_path: dist/mn2
