@@ -1,7 +1,7 @@
 # mn2
 ## A better Mininet CLI
 
-Have you ever wanted Mininet CLI to be just a bit more modern? Or maybe tried to look up what can you even run just to be greeted with unhelpful help?
+Have you ever wanted Mininet CLI to be just a bit more modern? Or maybe tried to look up what can you even run just to be greeted with entirely unhelpful help output?
 
 Look no further, this project abuses the `px` command to replace the default `cmd`-based CLI with a new one using `prompt_toolkit` and `typer` for improved user and developer experience.
 
@@ -23,7 +23,7 @@ Look no further, this project abuses the `px` command to replace the default `cm
 
 ## Installation and usage
 
-1. [Download `mn2`](https://github.com/oplik0/mn2/releases/latest/download/mn2) from the [Latest release](https://github.com/oplik0/mn2/releases/latest) to your work folder in the Mininet VM (or just wherever you're planning on using mininet)
+1. [Download `mn2`](https://github.com/oplik0/mn2/releases/latest/download/mn2) from the [latest release](https://github.com/oplik0/mn2/releases/latest) to your work folder in the Mininet VM (or just wherever you're planning on using mininet)
 2. Open the mininet CLI
 3. Run `source mn2`
 4. Your prompt should change to `mn2>` and you should now be using the new shell :) Rerunning `source mn2` should no longer do anything (because it checks if it's already being used)
