@@ -5,6 +5,7 @@ from curses import noecho
 from hashlib import sha1
 from os import wait
 import os
+from pdb import run
 from select import poll
 import select
 import sys
@@ -224,9 +225,26 @@ def start_mn2( mn ):
             stderr.print_exception(e)
 
     @app.command(rich_help_panel="Scripting")
-    def source(script: Annotated[typer.FileText, typer.Argument(help="Script to run")]):
+    def source(script: Annotated[typer.FileText, typer.Argument(help="Script to run")], args: Annotated[List[str], typer.Argument(help="Arguments to pass to the script in name=value format. Will replace {name} in script with the given string", shell_complete=False)]):
         """Run a script file"""
+        argdict = {}
+        for index,arg in enumerate(args):
+            if "=" in arg:
+                key, value = arg.split("=", 1)
+                argdict[key] = value
+                argdict[index] = value
+            else:
+                argdict[index] = arg
         for line in script.readlines():
+            line = line.strip().format(**argdict)
+            process_command(line)
+    @app.command(rich_help_panel="Scripting")
+    def run(script: Annotated[typer.FileText, typer.Argument(help="Script to run")]):
+        """Run a script file"""
+        argdict = { f"$"  }
+        
+        for line in script.readlines():
+            
             process_command(line)
 
     @app.command(rich_help_panel="Testing utilities")
@@ -508,12 +526,12 @@ def start_mn2( mn ):
     def noecho(ctx: typer.Context, cmd: Annotated[List[str], typer.Argument(help="Commands to run", shell_complete=False)]):
         """Run a command with echoing turned off"""
         if is_atty():
-            quietRun( 'stty -echo' )
+            quietRun('stty -echo')
         try:
             ctx.invoke(ctx.parent.command, *cmd)
         finally:
             if is_atty():
-                quietRun( 'stty echo' )
+                quietRun('stty echo')
 
     def overlap(a, b):
         return max(i for i in range(len(b)+1) if b[i-1] == a[-1] and a.endswith(b[:i]))
