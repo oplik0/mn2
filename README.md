@@ -29,6 +29,11 @@ Look no further, this project abuses the `px` command to replace the default `cm
 4. Your prompt should change to `mn2>` and you should now be using the new shell :) Rerunning `source mn2` should no longer do anything (because it checks if it's already being used)
 5. you can go back to mininet using `quit` and `exit` commands or just by sending EOF with `Ctrl+D`
 
+## Screenshots
+
+![running iperf in mn2](https://github.com/oplik0/mn2/assets/25460763/f5544d02-52aa-41ed-894a-0dcce77916e4)
+
+
 ## FAQ
 
 #### Q: Why even make this?
