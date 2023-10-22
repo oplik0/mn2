@@ -527,7 +527,6 @@ def start_mn2( mn ):
             multi = cast(MultiCommand, ctx.command)
             command_completions: List[CompletionItem] = commands.shell_complete(ctx, document.text)
             arg_completions: List[CompletionItem] = []
-            param_completions: List[CompletionItem] = []
             if len(command_completions) == 0 and document.text_before_cursor[-1] != " ":
                 command = multi.get_command(ctx, args[0])
                 if command is not None and not command.hidden:
@@ -536,17 +535,7 @@ def start_mn2( mn ):
                 command = multi.get_command(ctx, completion.value)
                 if command is not None and not command.hidden:
                     arg_completions.extend(command.shell_complete(ctx, document.text_before_cursor[len(completion.value):].strip()))
-            if len(command_completions) == len(arg_completions) == 0:
-                command = multi.get_command(ctx, args[0])
-                if command is not None and not command.hidden and len(args_before_cursor) > 1:
-                    all_params = command.get_params(ctx)
-                    matching_params = []
-                    for param in all_params:
-                        if param.name == args_before_cursor[-1].replace("-", "").strip() or args_before_cursor[-1].replace("-", "").strip() in param.opts:
-                            matching_params.append(param)
-                    for param in matching_params:
-                        param_completions.extend(param.shell_complete(ctx, args_before_cursor[-1]))
-            for item in command_completions + arg_completions + param_completions:
+            for item in command_completions + arg_completions:
                 if len(document.text_before_cursor) > 2 and document.text_before_cursor[-1] == "-" and document.text_before_cursor[-2] != "-" and item.value.startswith("--"):
                     continue
                 yield Completion(item.value, start_position=-overlap(document.text_before_cursor.strip(), item.value), display_meta=item.help)
