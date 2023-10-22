@@ -515,12 +515,12 @@ def start_mn2( mn ):
     @app.command(hidden=True)
     def exit(ctx: typer.Context):
         """Exit the CLI"""
-        raise typer.Exit()
+        raise SystemExit()
     
     @app.command(hidden=True)
     def quit(ctx: typer.Context):
         """Exit the CLI"""
-        raise typer.Exit()
+        raise SystemExit()
 
     @app.command()
     def noecho(ctx: typer.Context, cmd: Annotated[List[str], typer.Argument(help="Commands to run", shell_complete=False)]):
@@ -604,8 +604,11 @@ def start_mn2( mn ):
             except typer.Exit as e:
                 if e.code != 0:
                     raise EOFError
+                return
             except typer.Abort:
                 pass
+            except SystemExit:
+                return
             except KeyboardInterrupt:
                 pass
             except Exception as e:
