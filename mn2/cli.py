@@ -413,6 +413,11 @@ def start_mn2( mn ):
             return s
         match = unit_regex.match(s)
         return int(int(match.group("value")) * units.get(match.group("unit").upper(), 1) * (8 if match.group("byte") == "B" else 1))
+    
+    def file_completion(incomplete: str) -> List[Path]:
+        path = Path(".")
+        return list(path.glob(f"{incomplete}*"))
+
     @app.command(rich_help_panel="Testing utilities")
     def iperf(
         server: Annotated[Node, typer.Argument(help="Server to run iperf on", parser=mn_node)], 
@@ -432,7 +437,7 @@ def start_mn2( mn ):
         tos: Annotated[TOS, typer.Option("--tos", "-S", help="Set the IP type of service (tos) field in the IP header")]=None,
         tos_custom: Annotated[int, typer.Option("--tos-custom", help="Set the IP type of service to any custom (even one not in RFC1349) value")]=None,
         ttl: Annotated[int, typer.Option("--ttl", help="Set the IP TTL field")]=None,
-        file: Annotated[Path, typer.Option("--file", "-F", help="Use a file as a representative stream for measuring bandwidth")]=None,
+        file: Annotated[Path, typer.Option("--file", "-F", help="Use a file as a representative stream for measuring bandwidth", autocompletion=file_completion)]=None,
         precision: Annotated[int, typer.Option("--precision", help="Number of decimal places to print (only really useful for fast links)")]=2,
         ):
         """Run iperf between hosts."""
@@ -511,31 +516,45 @@ def start_mn2( mn ):
                 quietRun( 'stty echo' )
 
     def overlap(a, b):
-        return max(i for i in range(len(b)) if b[i-1] == a[-1] and a.endswith(b[:i]))
+        return max(i for i in range(len(b)+1) if b[i-1] == a[-1] and a.endswith(b[:i]))
 
     commands = typer.main.get_group(app)
     class TyperCompleter(Completer):
         def get_completions(self, document: Document, complete_event: CompleteEvent):
             args = split_arg_string(document.text)
+            args_before_cursor = split_arg_string(document.text_before_cursor)
             ctx = commands.make_context(args[0], args)
             multi = cast(MultiCommand, ctx.command)
             command_completions: List[CompletionItem] = commands.shell_complete(ctx, document.text)
             arg_completions: List[CompletionItem] = []
-            if len(command_completions) == 0:
+            param_completions: List[CompletionItem] = []
+            if len(command_completions) == 0 and document.text_before_cursor[-1] != " ":
                 command = multi.get_command(ctx, args[0])
                 if command is not None and not command.hidden:
-                    arg_completions.extend(command.shell_complete(ctx, document.text_before_cursor[len(args[0]):].strip()))
+                    arg_completions.extend(command.shell_complete(ctx, args_before_cursor[-1]))
             for completion in command_completions:
                 command = multi.get_command(ctx, completion.value)
                 if command is not None and not command.hidden:
                     arg_completions.extend(command.shell_complete(ctx, document.text_before_cursor[len(completion.value):].strip()))
-            for item in command_completions + arg_completions:
+            if len(command_completions) == len(arg_completions) == 0:
+                command = multi.get_command(ctx, args[0])
+                if command is not None and not command.hidden and len(args_before_cursor) > 1:
+                    all_params = command.get_params(ctx)
+                    matching_params = []
+                    for param in all_params:
+                        if param.name == args_before_cursor[-1].replace("-", "").strip() or args_before_cursor[-1].replace("-", "").strip() in param.opts:
+                            matching_params.append(param)
+                    for param in matching_params:
+                        param_completions.extend(param.shell_complete(ctx, args_before_cursor[-1]))
+            for item in command_completions + arg_completions + param_completions:
                 if len(document.text_before_cursor) > 2 and document.text_before_cursor[-1] == "-" and document.text_before_cursor[-2] != "-" and item.value.startswith("--"):
                     continue
                 yield Completion(item.value, start_position=-overlap(document.text_before_cursor.strip(), item.value), display_meta=item.help)
     class MnCompleter(Completer):
         def get_completions(self, document: Document, complete_event: CompleteEvent):
             last_word = document.get_word_before_cursor()
+            if document.text_before_cursor.strip().split(" ")[-1].startswith("-"):
+                return
             if last_word.startswith("h") or last_word.startswith("s") or last_word.startswith("c"):
                 for key in mn.keys():
                     if key.startswith(last_word):
