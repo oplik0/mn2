@@ -4,10 +4,12 @@
 from curses import noecho
 from hashlib import sha1
 from os import wait
+import os
 from select import poll
 import select
 import sys
 from typing import Any
+import typing
 
 
 def start_mn2( mn ):
@@ -15,12 +17,14 @@ def start_mn2( mn ):
     from prompt_toolkit.document import Document
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-    from prompt_toolkit.completion import CompleteEvent, Completer, Completion, merge_completers
+    from prompt_toolkit.completion import CompleteEvent, Completer, Completion, merge_completers, PathCompleter
     import typer
     from typer.rich_utils import rich_format_error
-    from typing import List, Optional, Any
+    from typer.completion import shell_complete
+    from typing import List, Optional, Any, cast
     from typing_extensions import Annotated
     from pathlib import Path
+    from click import MultiCommand
     from click.parser import split_arg_string
     from click.shell_completion import CompletionItem
     import re
@@ -426,7 +430,7 @@ def start_mn2( mn ):
         num: Annotated[int, typer.Option("--num", "-n", help="Number of buffers to transmit. Overrides the time")]=None,
         tradeoff: Annotated[bool, typer.Option("--tradeoff", "-r", help="Do a bidirectional test sequentially (server connects to client after the client test)")]=False,
         tos: Annotated[TOS, typer.Option("--tos", "-S", help="Set the IP type of service (tos) field in the IP header")]=None,
-        tos_custom: Annotated[int, typer.Option("--tos-custom", help="Set the IP type of service (tos) field in the IP header to the specified value, for when you need something not specified in RFC 1349")]=None,
+        tos_custom: Annotated[int, typer.Option("--tos-custom", help="Set the IP type of service to any custom (even one not in RFC1349) value")]=None,
         ttl: Annotated[int, typer.Option("--ttl", help="Set the IP TTL field")]=None,
         file: Annotated[Path, typer.Option("--file", "-F", help="Use a file as a representative stream for measuring bandwidth")]=None,
         precision: Annotated[int, typer.Option("--precision", help="Number of decimal places to print (only really useful for fast links)")]=2,
@@ -513,9 +517,22 @@ def start_mn2( mn ):
     class TyperCompleter(Completer):
         def get_completions(self, document: Document, complete_event: CompleteEvent):
             args = split_arg_string(document.text)
-            completions: List[CompletionItem] = commands.shell_complete(commands.make_context("mn2", args), document.text_before_cursor)
-            for item in completions:
-                yield Completion(item.value, start_position=-overlap(document.text_before_cursor, item.value), display_meta=item.help)
+            ctx = commands.make_context(args[0], args)
+            multi = cast(MultiCommand, ctx.command)
+            command_completions: List[CompletionItem] = commands.shell_complete(ctx, document.text)
+            arg_completions: List[CompletionItem] = []
+            if len(command_completions) == 0:
+                command = multi.get_command(ctx, args[0])
+                if command is not None and not command.hidden:
+                    arg_completions.extend(command.shell_complete(ctx, document.text_before_cursor[len(args[0]):].strip()))
+            for completion in command_completions:
+                command = multi.get_command(ctx, completion.value)
+                if command is not None and not command.hidden:
+                    arg_completions.extend(command.shell_complete(ctx, document.text_before_cursor[len(completion.value):].strip()))
+            for item in command_completions + arg_completions:
+                if len(document.text_before_cursor) > 2 and document.text_before_cursor[-1] == "-" and document.text_before_cursor[-2] != "-" and item.value.startswith("--"):
+                    continue
+                yield Completion(item.value, start_position=-overlap(document.text_before_cursor.strip(), item.value), display_meta=item.help)
     class MnCompleter(Completer):
         def get_completions(self, document: Document, complete_event: CompleteEvent):
             last_word = document.get_word_before_cursor()
