@@ -68,6 +68,7 @@ def start_mn2( mn ):
     app = typer.Typer(name="mn2>", 
                       rich_markup_mode="rich", 
                       pretty_exceptions_enable=True, 
+                      pretty_exceptions_show_locals=False,
                       add_completion=False, 
                       help="mn2 is an improved version of the Mininet CLI. It is based on Typer and Prompt Toolkit, and provides a more user-friendly and complete interface to Mininet.",
                       context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
@@ -76,8 +77,8 @@ def start_mn2( mn ):
     def default(ctx: typer.Context, host: Annotated[Node, typer.Argument(help="Host to run the command on", parser=mn_node)], cmd: Annotated[List[str], typer.Argument(help="Commands to run on the host", shell_complete=False)]):
         cmd_string = " ".join(cmd)
         node = host
-        hostRegex = re.compile(f"(?:$|(?<=[\s\$/:]))(?P<host>h1|h2|s1|c0)(?=[\s:\.]|$)")
-        final_cmd = hostRegex.sub(lambda match: mn[match.group("host")].defaultIntf().updateIP() or match.group("host"), cmd_string)
+        hostRegex = re.compile(f"(?:$|(?<=[\s\$/:]))(?P<host>{'|'.join(mn.keys())})(?=[\s:\.]|$)")
+        final_cmd = hostRegex.sub(lambda match: mn[match.group("host")].IP() or match.group("host"), cmd_string)
         node.sendCmd(final_cmd)
 
         nodePoller = poll()
@@ -279,16 +280,21 @@ def start_mn2( mn ):
             return False
         return True
     
-    def bit_convert(bits: int, ps: bool = False, precision: int = 2):
+    def bit_convert(bits: int, ps: bool = False, precision: int = 2, format = None):
+        bytes = False
+        if format in ["B", "K", "M", "G", "A"]:
+            bytes = True
+            format = format.lower()
+            bits = bits // 8
         unit_scale = bits.bit_length() // 10
-        if unit_scale == 0:
-            return f"{bits} bps"
-        elif unit_scale == 1:
-            return f"{round(bits / (2**10), precision)} kb{'ps' if ps else ''}"
-        elif unit_scale == 2:
-            return f"{round(bits / (2**20), precision)} Mb{'ps' if ps else ''}"
+        if format=="b" or unit_scale == 0:
+            return f"{bits} {'B' if bytes else 'b'}{'ps' if ps else ''}"
+        elif format == "k" or unit_scale == 1:
+            return f"{round(bits / (2**10), precision)} K{'B' if bytes else 'b'}{'ps' if ps else ''}"
+        elif format == "g" or unit_scale == 2:
+            return f"{round(bits / (2**20), precision)} M{'B' if bytes else 'b'}{'ps' if ps else ''}"
         elif unit_scale == 3:
-            return f"{round(bits / (2**30), precision)} Gb{'ps' if ps else ''}"
+            return f"{round(bits / (2**30), precision)} G{'B' if bytes else 'b'}{'ps' if ps else ''}"
     def run_iperf(
             server: Node,
             clients: List[Node],
@@ -313,22 +319,30 @@ def start_mn2( mn ):
             server.sendInt()
             server.monitor(timeoutms=100)
         server.cmd("killall -9 iperf")
-        iperf_server_cmd = f"iperf -y C -s -p {port} --len {length}{' -u' if udp else ''} &"
-        iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {time} --len {length} {'-u' if udp else ''} {'--window ' + window if window else ''} {'--mss ' + mss if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + bandwidth if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + file.absolute() if file else ''}"
+        iperf_server_cmd = f"iperf -y C --sum-only -s -p {port} --len {length}{' -u' if udp else ''} &"
+        iperf_client_cmd = f"iperf -y C --sum-only -c {server.IP()} -p {port} -t {time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''}"
         
         table = Table(title="iperf results", expand=True)
         table.add_column("Client", justify="left", style="cyan")
         table.add_column("Client IP", justify="left", style="green")
+        table.add_column("Server", justify="left", style="cyan")
         table.add_column("Server IP", justify="left", style="green")
-        table.add_column("Interval", justify="left", style="cyan")
-        table.add_column("Sent", justify="left", style="cyan")
-        table.add_column("Rate (server)", justify="left", style="green")
-        table.add_column("Rate (client)", justify="left", style="green")
+        table.add_column("Interval", justify="left", style="blue")
+        table.add_column("Rate (server)", justify="left", style="yellow")
+        table.add_column("Rate (client)", justify="left", style="yellow")
+        table.add_column("Transfered", justify="left", style="magenta")
+        if udp or bandwidth:
+            table.add_column("Jitter", justify="left", style="blue")
+            table.add_column("Sent", justify="left", style="magenta")
+            table.add_column("Received", justify="left", style="magenta")
+            table.add_column("Loss", justify="left", style="red")
+            table.add_column("Out of order", justify="left", style="red")
 
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), TimeElapsedColumn(), transient=True) as progress:
             server_progress = progress.add_task("Starting iperf server", total=True)
             server.sendCmd(iperf_server_cmd)
 
+            iperf_fieldnames = ["date", "client_ip", "client_port", "server_ip", "server_port", "process_bumber", "interval", "transmitted", "rate", "jitter", "lost", "sent", "loss", "out of order"]
             for client in clients:
                 if not udp and not wait_listening(client, server.IP(), port):
                     raise Exception("iperf server failed to start")
@@ -336,11 +350,10 @@ def start_mn2( mn ):
                 client_progress = progress.add_task(f"Running iperf client on {client.name}", total=True)
                 cliout = client.cmd(iperf_client_cmd)
                 client_csv = [line for line in cliout.strip().split("\n") if line.count(",")>=4]
-                iperf_fieldnames = ["date", "client_ip", "client_port", "server_ip", "server_port", "ip_version", "interval", "sent", "rate"]
                 client_reader = csv.DictReader(client_csv, fieldnames=iperf_fieldnames)
                 client_values = [row for row in client_reader]
                 while True:
-                    serverout = server.monitor( timeoutms=5000 )
+                    serverout = server.monitor(timeoutms=5000)
                     server_csv = [line for line in serverout.strip().split("\n") if line.count(",")>=4]
                     server_reader = csv.DictReader(server_csv, fieldnames=iperf_fieldnames)
                     server_values = [row for row in server_reader]
@@ -350,26 +363,65 @@ def start_mn2( mn ):
                             value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
                     if len(server_values) and int(server_values[-1]["rate"]) > 0:
                         break
-                table.add_row(client.name, client.IP(), server.IP(), server_values[-1]["interval"], bit_convert(int(client_values[-1]["sent"])), bit_convert(int(server_values[-1]["rate"]), True), bit_convert(int(client_values[-1]["rate"]), True))
+                if udp or bandwidth:
+                    table.add_row(
+                        client.name, 
+                        client.IP(),
+                        server.name,
+                        server.IP(), 
+                        client_values[-1]["interval"] + "s",
+                        bit_convert(int(server_values[-1]["rate"]), True, precision, format),
+                        bit_convert(int(client_values[-1]["rate"]), True, precision, format),
+                        bit_convert(int(client_values[-1]["transmitted"])*8, False, precision, format),
+                        f"{float(server_values[-1]['jitter']):.2f}ms" if client_values[-1]["jitter"] != None else None,
+                        client_values[-1]["sent"],
+                        str(int(client_values[-1]["sent"]) - int(client_values[-1]["lost"])),
+                        f"{float(client_values[-1]['loss']):.2f}%",
+                        client_values[-1]["out of order"],
+                        )
+                else:
+                    table.add_row(
+                        client.name, 
+                        client.IP(),
+                        server.name,
+                        server.IP(), 
+                        client_values[-1]["interval"] + "s",
+                        bit_convert(int(server_values[-1]["rate"]), True, precision, format),
+                        bit_convert(int(client_values[-1]["rate"]), True, precision, format),
+                        bit_convert(int(client_values[-1]["transmitted"]) * 8, False, precision, format),
+                        )
                 progress.update(client_progress, completed=True)
         print(table)
         server.sendInt()
         server.cmd("killall -9 iperf")
 
-
+    unit_regex = re.compile(r"(?P<value>\d+)\s*(?P<unit>[kKmMgG]?i?)(?P<byte>[bB]?).*")
+    units = {
+        "GI": 2**30,
+        "G": 10**9,
+        "MI": 2**20,
+        "M": 10**6,
+        "KI": 2**10,
+        "K": 10**3,
+    }
+    def bit_unit_parser(s: str) -> int:
+        if s is None:
+            return s
+        match = unit_regex.match(s)
+        return int(int(match.group("value")) * units.get(match.group("unit").upper(), 1) * (8 if match.group("byte") == "B" else 1))
     @app.command(rich_help_panel="Testing utilities")
     def iperf(
         server: Annotated[Node, typer.Argument(help="Server to run iperf on", parser=mn_node)], 
         clients: Annotated[List[Node], typer.Argument(help="Clients to run iperf from", parser=mn_node)],
         port: Annotated[int, typer.Option("--port", "-p", help="Port to run iperf on")]=5001,
-        format: Annotated[str, typer.Option("--format", "-f", help="A letter specifying the format for printing bandwidth numbers")]="m",
-        length: Annotated[int, typer.Option("--length", "-l", help="Length of buffer to read or write (default 8 KB)")]=8192,
+        format: Annotated[str, typer.Option("--format", "-f", help="A letter specifying the format for printing bandwidth numbers. Defaults to a for adaptive")]="a",
+        length: Annotated[int, typer.Option("--length", "-l", help="Length of buffer to read or write (default 8 KB)", parser=bit_unit_parser)]="8192",
         udp: Annotated[bool, typer.Option("--udp", "-u", help="Use UDP instead of TCP")]=False,
-        window: Annotated[int, typer.Option("--window", "-w", help="TCP window size")]=None,
-        mss: Annotated[int, typer.Option("--mss", "-m", help="TCP maximum segment size")]=None,
+        window: Annotated[int, typer.Option("--window", "-w", help="TCP window size", parser=bit_unit_parser)]=None,
+        mss: Annotated[int, typer.Option("--mss", "-m", help="TCP maximum segment size", parser=bit_unit_parser)]=None,
         nodelay: Annotated[bool, typer.Option("--nodelay", "-N", help="Set TCP no delay, disabling Nagle's Algorithm")]=False,
         time: Annotated[int, typer.Option("--time", "-t", help="The time in seconds to transmit for")]=10,
-        bandwidth: Annotated[int, typer.Option("--bandwidth", "-b", help="Set UDP target bandwidth to n bits/sec, implies UDP", )]=None,
+        bandwidth: Annotated[int, typer.Option("--bandwidth", "-b", help="Set UDP target bandwidth to n bits/sec, implies UDP", parser=bit_unit_parser)]=None,
         dualtest: Annotated[bool, typer.Option("--dualtest", "-d", help="Do a bidirectional test simultaneously")]=False,
         num: Annotated[int, typer.Option("--num", "-n", help="Number of buffers to transmit. Overrides the time")]=None,
         tradeoff: Annotated[bool, typer.Option("--tradeoff", "-r", help="Do a bidirectional test sequentially (server connects to client after the client test)")]=False,
@@ -388,10 +440,10 @@ def start_mn2( mn ):
         server: Annotated[Node, typer.Argument(help="Server to run iperf on",  parser=mn_node)], 
         clients: Annotated[List[Node], typer.Argument(help="Clients to run iperf from", parser=mn_node)],
         port: Annotated[int, typer.Option("--port", "-p", help="Port to run iperf on")]=5001,
-        format: Annotated[str, typer.Option("--format", "-f", help="A letter specifying the format for printing bandwidth numbers")]="m",
-        length: Annotated[int, typer.Option("--length", "-l", help="Length of buffer to read or write (default 8 KB)")]=8192,
+        format: Annotated[str, typer.Option("--format", "-f", help="A letter specifying the format for printing bandwidth numbers. Defaults to a for adaptive")]="a",
+        length: Annotated[int, typer.Option("--length", "-l", help="Length of buffer to read or write (default 8 KB)", parser=bit_unit_parser)]="8192",
         time: Annotated[int, typer.Option("--time", "-t", help="The time in seconds to transmit for")]=10,
-        bandwidth: Annotated[int, typer.Option("--bandwidth", "-b", help="Set UDP target bandwidth to n bits/sec", )]=None,
+        bandwidth: Annotated[int, typer.Option("--bandwidth", "-b", help="Set UDP target bandwidth to n bits/sec", parser=bit_unit_parser)]=None,
         dualtest: Annotated[bool, typer.Option("--dualtest", "-d", help="Do a bidirectional test simultaneously")]=False,
         num: Annotated[int, typer.Option("--num", "-n", help="Number of buffers to transmit. Overrides the time")]=None,
         tradeoff: Annotated[bool, typer.Option("--tradeoff", "-r", help="Do a bidirectional test sequentially (server connects to client after the client test)")]=False,
@@ -401,7 +453,7 @@ def start_mn2( mn ):
         file: Annotated[Path, typer.Option("--file", "-F", help="Use a file as a representative stream for measuring bandwidth")]=None,
         precision: Annotated[int, typer.Option("--precision", help="Number of decimal places to print (only really useful for fast links)")]=2,
         ):
-        """Run iperf between hosts."""
+        """Run iperf between hosts using UDP (can also be achieved by using iperf -u)."""
         tos = tos_custom or (int(tos) if tos else None)
         run_iperf(server, clients, port, format, length, True, None, None, None, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision)
 
@@ -510,7 +562,7 @@ def start_mn2( mn ):
                 if e.code != 0:
                     raise EOFError
             except typer.Abort:
-                raise EOFError
+                pass
             except KeyboardInterrupt:
                 pass
             except Exception as e:
