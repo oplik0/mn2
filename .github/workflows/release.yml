@@ -24,7 +24,7 @@ jobs:
         - name: Install dependencies
           run: poetry install
         - name: build
-          run: poetry run ./build.py
+          run: poetry run build.py
   release-please:
     runs-on: ubuntu-latest
     needs: test
@@ -55,7 +55,7 @@ jobs:
         - name: Install dependencies
           run: poetry install
         - name: build
-          run: poetry run ./build.py
+          run: poetry run build.py
         - uses: shogo82148/actions-upload-release-asset@v1
           with:
             upload_url: ${{ needs.release-please.outputs.upload-url }}

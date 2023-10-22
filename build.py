@@ -1,10 +1,11 @@
+import pathlib
 import python_minifier
 import stickytape
 import sys
 import base64
 
 def build():
-    
+    pathlib.Path("dist").mkdir(exist_ok=True)
     output = stickytape.script(
         "mn2/cli.py",
         python_binary=sys.executable,
