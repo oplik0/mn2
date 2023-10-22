@@ -479,7 +479,7 @@ python-minifier = "2.9.0"
 type = "git"
 url = "https://github.com/oplik0/stickytape.git"
 reference = "HEAD"
-resolved_reference = "8da5810dfbc58f2dce4f210b95400d221b1c9956"
+resolved_reference = "e08727a1821934a2d2805312145be9dab79e5962"
 
 [[package]]
 name = "toml"
