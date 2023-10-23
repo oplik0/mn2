@@ -228,6 +228,7 @@ def start_mn2( mn ):
     def source(script: Annotated[typer.FileText, typer.Argument(help="Script to run")], args: Annotated[List[str], typer.Argument(help="Arguments to pass to the script in name=value format. Will replace {name} in script with the given string", shell_complete=False, callback=optional_list)]):
         """Run a script file"""
         argdict = {}
+        arglist = []
         if args:
             for index,arg in enumerate(args):
                 if "=" in arg:
@@ -236,9 +237,11 @@ def start_mn2( mn ):
                     argdict[index] = value
                 else:
                     argdict[index] = arg
+                    arglist.append(arg)
         for line in script.readlines():
             try:
-                line = line.strip().format(**argdict)
+                if len(line) < 20000:
+                    line = line.strip().format(*arglist, **argdict)
             except ValueError:
                 pass
             process_command(line)
