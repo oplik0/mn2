@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/oplik0/mn2/compare/v0.1.0...v0.2.0) (2023-10-23)
+
+
+### Features
+
+* cache dependencies, resovles [#10](https://github.com/oplik0/mn2/issues/10) ([33e38a5](https://github.com/oplik0/mn2/commit/33e38a50b75dd2ad0f78a0ab77383736147c40a9))
+* run files without command ([78f03c8](https://github.com/oplik0/mn2/commit/78f03c8b934505cc3578901da508a7653877bea4))
+* start organizing the project ([ce7c39c](https://github.com/oplik0/mn2/commit/ce7c39c93ef3c826951b75ccea7a3b6592c29f88))
+
+
+### Documentation
+
+* add direct download link ([250b0b1](https://github.com/oplik0/mn2/commit/250b0b16bb5687187a3e38e7d43336b2d4dd9daa))
+* add sample screenshot ([25cc84d](https://github.com/oplik0/mn2/commit/25cc84db9aa5f1e2c8da37043336eea721391fa9))
+* finish last sentence ([18f18de](https://github.com/oplik0/mn2/commit/18f18de23bec634aeea2f6bb27b786873980dc36))
+* fix small typo ([2e59ab7](https://github.com/oplik0/mn2/commit/2e59ab7412b2e23e59a49ad06048864c638c8788))
+
 ## 0.1.0 (2023-10-22)
 
 
