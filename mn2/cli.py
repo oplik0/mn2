@@ -229,7 +229,7 @@ def start_mn2( mn ):
         """Run a script file"""
         argdict = {}
         arglist = []
-        if args:
+        if len(args):
             for index,arg in enumerate(args):
                 if "=" in arg:
                     key, value = arg.split("=", 1)
@@ -240,11 +240,15 @@ def start_mn2( mn ):
                     arglist.append(arg)
         for line in script.readlines():
             try:
-                if len(line) < 20000:
+                # don't parse extremely long lines for performance reasons
+                if len(line) < 100_000:
                     line = line.strip().format(*arglist, **argdict)
             except ValueError:
                 pass
-            process_command(line)
+            try:
+                process_command(line)
+            except Exception as e:
+                stderr.print_exception(e)
     @app.command(rich_help_panel="Scripting")
     def run(script: Annotated[typer.FileText, typer.Argument(help="Script to run")]):
         """Run a script file"""
