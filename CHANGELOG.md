@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/oplik0/mn2/compare/v0.2.0...v0.2.1) (2023-10-23)
+
+
+### Bug Fixes
+
+* stickytape build issue ([fa1ea89](https://github.com/oplik0/mn2/commit/fa1ea8905630317292b7654f2512ab5185559b64))
+
 ## [0.2.0](https://github.com/oplik0/mn2/compare/v0.1.0...v0.2.0) (2023-10-23)
 
 
