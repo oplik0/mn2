@@ -1,18 +1,5 @@
 
 
-
-from curses import noecho
-from hashlib import sha1
-from os import wait
-import os
-from pdb import run
-from select import poll
-import select
-import sys
-from typing import Any
-import typing
-
-
 def start_mn2( mn ):
     from prompt_toolkit import PromptSession
     from prompt_toolkit.document import Document
@@ -37,6 +24,9 @@ def start_mn2( mn ):
     from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
     from subprocess import call
     from enum import Enum
+    from select import poll
+    import select
+    import sys
     import csv
     from os import environ
     import time
