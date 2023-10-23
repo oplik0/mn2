@@ -27,12 +27,16 @@ import sys
 import csv
 from os import environ
 import time
+import errno
 sleep = time.sleep
 
 from mininet.node import Node
+from mininet.util import quietRun, dumpNodeConnections
+from mininet.term import makeTerms, runX11
+
 import locale
 
-from mn2.utils import isReadable, is_atty, wait_listening, bit_convert
+from mn2.utils import isReadable, is_atty, wait_listening, bit_convert, optional_list
 
 def start_mn2( mn ):
     
@@ -53,6 +57,14 @@ def start_mn2( mn ):
             return mn[value]
         except KeyError as e:
             raise typer.BadParameter(f"Host {value} not found in topology")
+    
+    def default_parser(value: str):
+        try:
+            return mn[value]
+        except KeyError as e:
+            if Path(value).exists():
+                return Path(value)
+            raise typer.BadParameter(f"Host {value} not found in topology")
     app = typer.Typer(name="mn2>", 
                       rich_markup_mode="rich", 
                       pretty_exceptions_enable=True, 
@@ -62,41 +74,46 @@ def start_mn2( mn ):
                       context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
                       )
     @app.command(hidden=True, help="", context_settings={"ignore_unknown_options": True})
-    def default(ctx: typer.Context, host: Annotated[Node, typer.Argument(help="Host to run the command on", parser=mn_node)], cmd: Annotated[List[str], typer.Argument(help="Commands to run on the host", shell_complete=False)]):
-        cmd_string = " ".join(cmd)
-        node = host
-        hostRegex = re.compile(f"(?:$|(?<=[\s\$/:]))(?P<host>{'|'.join(mn.keys())})(?=[\s:\.]|$)")
-        final_cmd = hostRegex.sub(lambda match: mn[match.group("host")].IP() or match.group("host"), cmd_string)
-        node.sendCmd(final_cmd)
+    def default(ctx: typer.Context, host: Annotated[Node, typer.Argument(help="Host to run the command on", parser=default_parser)], cmd: Annotated[Optional[List[str]], typer.Argument(help="Commands to run on the host", shell_complete=False, callback=optional_list)]):
+        if isinstance(host, Node):
+            if cmd is None or (len(cmd)==1 and cmd[0] == ""):
+                raise typer.BadParameter("No command given")
+            cmd_string = " ".join(cmd)
+            node = host
+            hostRegex = re.compile(f"(?:$|(?<=[\s\$/:]))(?P<host>{'|'.join(mn.keys())})(?=[\s:\.]|$)")
+            final_cmd = hostRegex.sub(lambda match: mn[match.group("host")].IP() or match.group("host"), cmd_string)
+            node.sendCmd(final_cmd)
 
-        nodePoller = poll()
-        nodePoller.register(node.stdout)
-        bothPoller = poll()
-        bothPoller.register(node.stdout)
-        bothPoller.register(sys.stdin)
-        inPoller = poll()
-        inPoller.register(sys.stdin)
-        if is_atty():
-            quietRun('stty -icanon min 1')
-        while True:
-            try:
-                bothPoller.poll()
+            nodePoller = poll()
+            nodePoller.register(node.stdout)
+            bothPoller = poll()
+            bothPoller.register(node.stdout)
+            bothPoller.register(sys.stdin)
+            inPoller = poll()
+            inPoller.register(sys.stdin)
+            if is_atty():
+                quietRun('stty -icanon min 1')
+            while True:
+                try:
+                    bothPoller.poll()
 
-                if isReadable(inPoller):
-                    node.write(sys.stdin.read(1))
-                if isReadable(nodePoller):
-                    data = node.monitor()
-                    print(data)
-                if not node.waiting:
-                    break
-            except KeyboardInterrupt:
-                node.sendInt()
-            except select.error as e:
-                errno_, errmsg = e.args
-                if errno_ != errno.EINTR:
+                    if isReadable(inPoller):
+                        node.write(sys.stdin.read(1))
+                    if isReadable(nodePoller):
+                        data = node.monitor()
+                        print(data)
+                    if not node.waiting:
+                        break
+                except KeyboardInterrupt:
                     node.sendInt()
-                    raise
-
+                except select.error as e:
+                    errno_, errmsg = e.args
+                    if errno_ != errno.EINTR:
+                        node.sendInt()
+                        raise
+        elif isinstance(host, Path):
+            with host.open() as f:
+                source(f, cmd)
 
     @app.command()
     def help(ctx: typer.Context, command: Annotated[Optional[str], typer.Argument()] = None):
@@ -208,18 +225,22 @@ def start_mn2( mn ):
             stderr.print_exception(e)
 
     @app.command(rich_help_panel="Scripting")
-    def source(script: Annotated[typer.FileText, typer.Argument(help="Script to run")], args: Annotated[List[str], typer.Argument(help="Arguments to pass to the script in name=value format. Will replace {name} in script with the given string", shell_complete=False)]):
+    def source(script: Annotated[typer.FileText, typer.Argument(help="Script to run")], args: Annotated[List[str], typer.Argument(help="Arguments to pass to the script in name=value format. Will replace {name} in script with the given string", shell_complete=False, callback=optional_list)]):
         """Run a script file"""
         argdict = {}
-        for index,arg in enumerate(args):
-            if "=" in arg:
-                key, value = arg.split("=", 1)
-                argdict[key] = value
-                argdict[index] = value
-            else:
-                argdict[index] = arg
+        if args:
+            for index,arg in enumerate(args):
+                if "=" in arg:
+                    key, value = arg.split("=", 1)
+                    argdict[key] = value
+                    argdict[index] = value
+                else:
+                    argdict[index] = arg
         for line in script.readlines():
-            line = line.strip().format(**argdict)
+            try:
+                line = line.strip().format(**argdict)
+            except ValueError:
+                pass
             process_command(line)
     @app.command(rich_help_panel="Scripting")
     def run(script: Annotated[typer.FileText, typer.Argument(help="Script to run")]):
@@ -502,6 +523,8 @@ def start_mn2( mn ):
         def get_completions(self, document: Document, complete_event: CompleteEvent):
             args = split_arg_string(document.text)
             args_before_cursor = split_arg_string(document.text_before_cursor)
+            if not len(args) or not len(args_before_cursor):
+                return
             ctx = commands.make_context(args[0], args)
             multi = cast(MultiCommand, ctx.command)
             command_completions: List[CompletionItem] = commands.shell_complete(ctx, document.text)
@@ -539,7 +562,7 @@ def start_mn2( mn ):
         history_file.touch()
     session = PromptSession(history=FileHistory(history_file), 
                             auto_suggest=AutoSuggestFromHistory(),
-                            completer=merge_completers([TyperCompleter(), MnCompleter()], deduplicate=True)
+                            completer=merge_completers([TyperCompleter(), MnCompleter(), PathCompleter(file_filter=lambda s: s.endswith(".mn") or s.endswith(".mn2") or s.endswith(".txt"))], deduplicate=True)
                             )
     
 
@@ -548,6 +571,8 @@ def start_mn2( mn ):
         if not len(text.strip()) or text.strip().startswith("#"):
             return
         argv = split_arg_string(text)
+        if argv[0] == "source" or len(argv) == 1:
+            argv.append("")
         if argv[0] not in commands.commands.keys():
             argv.insert(0, "default")
         return command(argv, standalone_mode=False)

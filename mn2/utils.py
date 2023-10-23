@@ -3,6 +3,7 @@ import os
 from select import POLLIN
 import sys
 import time
+from typing import List, Optional
 
 def isReadable( poller ):
         "Check whether a Poll object has a readable fd."
@@ -39,3 +40,6 @@ def bit_convert(bits: int, ps: bool = False, precision: int = 2, format = None):
         return f"{round(bits / (2**20), precision)} M{'B' if bytes else 'b'}{'ps' if ps else ''}"
     elif unit_scale == 3:
         return f"{round(bits / (2**30), precision)} G{'B' if bytes else 'b'}{'ps' if ps else ''}"
+    
+def optional_list(value: Optional[List[str]]) -> List[str]:
+    return value if value else []
