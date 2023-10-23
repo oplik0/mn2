@@ -74,7 +74,7 @@ def start_mn2( mn ):
                       context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
                       )
     @app.command(hidden=True, help="", context_settings={"ignore_unknown_options": True})
-    def default(ctx: typer.Context, host: Annotated[Node, typer.Argument(help="Host to run the command on", parser=default_parser)], cmd: Annotated[Optional[List[str]], typer.Argument(help="Commands to run on the host", shell_complete=False, callback=optional_list)]):
+    def default(ctx: typer.Context, host: Annotated[Node, typer.Argument(help="Host to run the command on", parser=default_parser)], cmd: Annotated[List[str], typer.Argument(help="Commands to run on the host", shell_complete=False, callback=optional_list)]):
         if isinstance(host, Node):
             if cmd is None or (len(cmd)==1 and cmd[0] == ""):
                 raise typer.BadParameter("No command given")
