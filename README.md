@@ -49,4 +49,4 @@ Besides - at the time of writing last Mininet release was 2 years old. I wanted 
 #### Q: What the hell is this script doing?
 **A:** the `mn2` script simply runs a base85 encoded (to fit in a single line) script generrated from the `mn2` module with `stickytape` - a slightly cursed bundler that embeds all external dependencies within the script itself, unpacking them on startup. I'm using a significantly modified version here which you can find under [oplik0/stickytape](https://github.com/oplik0/stickytape) - primary difference from upstream is usage of an encoded zip file instead of just embeding sources as strings.
 
-Additionally, for the production build, 
+Additionally, for the production build, everything is minified to save on space - making for even more arkane-looking python inside :)
