@@ -10,14 +10,14 @@ from typing import Annotated
 def build(minify: Annotated[bool, typer.Option("--minify", "-m", help="Minify the output (warning: will take a lot longer to build)")]=False):
     pathlib.Path("dist").mkdir(exist_ok=True)
     output = stickytape.script(
-        "mn2/cli.py",
+        "mn2/__init__.py",
         python_binary=sys.executable,
         add_python_modules=["pygments", "pygments.lexers.python", "rich.ansi", "click._textwrap"],
         minify=minify
     )
     if minify:
         output = python_minifier.minify(output,
-                                        filename='cli.py',
+                                        filename='mn2.py',
                                         remove_literal_statements=False,
                                         remove_annotations=False,
                                         remove_pass=True,

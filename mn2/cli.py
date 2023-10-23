@@ -1,41 +1,43 @@
+from prompt_toolkit import PromptSession
+from prompt_toolkit.document import Document
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion, merge_completers, PathCompleter
+import typer
+from typer.rich_utils import rich_format_error
+from typer.completion import shell_complete
+from typing import List, Optional, Any, cast
+from typing_extensions import Annotated
+from pathlib import Path
+from click import MultiCommand
+from click.parser import split_arg_string
+from click.shell_completion import CompletionItem
+import re
+from rich import print
+from rich.console import Console
+from rich.table import Table
+from rich.tree import Tree
+from rich.traceback import Traceback
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from subprocess import call
+from enum import Enum
+from select import poll
+import select
+import sys
+import csv
+from os import environ
+import time
+sleep = time.sleep
 
+from mininet.node import Node
+import locale
+
+from mn2.utils import isReadable, is_atty, wait_listening, bit_convert
 
 def start_mn2( mn ):
-    from prompt_toolkit import PromptSession
-    from prompt_toolkit.document import Document
-    from prompt_toolkit.history import FileHistory
-    from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-    from prompt_toolkit.completion import CompleteEvent, Completer, Completion, merge_completers, PathCompleter
-    import typer
-    from typer.rich_utils import rich_format_error
-    from typer.completion import shell_complete
-    from typing import List, Optional, Any, cast
-    from typing_extensions import Annotated
-    from pathlib import Path
-    from click import MultiCommand
-    from click.parser import split_arg_string
-    from click.shell_completion import CompletionItem
-    import re
-    from rich import print
-    from rich.console import Console
-    from rich.table import Table
-    from rich.tree import Tree
-    from rich.traceback import Traceback
-    from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-    from subprocess import call
-    from enum import Enum
-    from select import poll
-    import select
-    import sys
-    import csv
-    from os import environ
-    import time
-    sleep = time.sleep
-    from mininet.node import Node
     
     stderr = Console(stderr=True)
 
-    import locale
     if locale.getpreferredencoding() != "UTF-8":
         print("Warning: your locale is not set to UTF-8, this may cause issues with mn2. Trying to override it...", console=stderr)
         try:
@@ -45,16 +47,7 @@ def start_mn2( mn ):
             print("Warning: failed to override locale", console=stderr)
     
 
-    def isReadable( poller ):
-        "Check whether a Poll object has a readable fd."
-        for fdmask in poller.poll( 0 ):
-            mask = fdmask[ 1 ]
-            if mask & POLLIN:
-                return True
-            return False
-    def is_atty():
-        "Check whether stdin is a tty."
-        return os.isatty( sys.stdin.fileno() )
+    
     def mn_node(value: str):
         try:
             return mn[value]
@@ -284,29 +277,7 @@ def start_mn2( mn ):
         def __int__(self):
             return self.score
 
-    def wait_listening(client, server:str="127.0.0.1", port: int=80, timeout: int = None):
-        """Wait until server is listening on given port."""
-        start_time = time.time()
-        client.cmd(f"{'timeout ' + timeout +' ' if timeout else ''}sh -c 'until nc -z {server} {port} > /dev/null; do sleep 0.2; done'")
-        if timeout and time.time() - start_time > timeout:
-            return False
-        return True
     
-    def bit_convert(bits: int, ps: bool = False, precision: int = 2, format = None):
-        bytes = False
-        if format in ["B", "K", "M", "G", "A"]:
-            bytes = True
-            format = format.lower()
-            bits = bits // 8
-        unit_scale = bits.bit_length() // 10
-        if format=="b" or unit_scale == 0:
-            return f"{bits} {'B' if bytes else 'b'}{'ps' if ps else ''}"
-        elif format == "k" or unit_scale == 1:
-            return f"{round(bits / (2**10), precision)} K{'B' if bytes else 'b'}{'ps' if ps else ''}"
-        elif format == "g" or unit_scale == 2:
-            return f"{round(bits / (2**20), precision)} M{'B' if bytes else 'b'}{'ps' if ps else ''}"
-        elif unit_scale == 3:
-            return f"{round(bits / (2**30), precision)} G{'B' if bytes else 'b'}{'ps' if ps else ''}"
     def run_iperf(
             server: Node,
             clients: List[Node],
@@ -619,18 +590,3 @@ def start_mn2( mn ):
                     )
                     stderr.print(tb)
 
-if __name__ == "mininet.cli":
-    global is_mn2
-    initial_globals = globals().copy()
-    initial_locals = locals().copy()
-    is_mn2 = True
-    try:
-        start_mn2( net )
-    except Exception as e:
-        print(e)
-        import traceback
-        traceback.print_exc()
-    finally:
-        is_mn2 = False
-        globals().update(initial_globals)
-        locals().update(initial_locals)
