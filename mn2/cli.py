@@ -1,3 +1,4 @@
+from turtle import st
 from prompt_toolkit import PromptSession
 from prompt_toolkit.document import Document
 from prompt_toolkit.history import FileHistory
@@ -13,7 +14,6 @@ from click import MultiCommand
 from click.parser import split_arg_string
 from click.shell_completion import CompletionItem
 import re
-from rich import print
 from rich.console import Console
 from rich.table import Table
 from rich.tree import Tree
@@ -28,6 +28,8 @@ import csv
 from os import environ
 import time
 import errno
+from pathvalidate import sanitize_filepath
+import builtins
 sleep = time.sleep
 
 from mininet.node import Node
@@ -39,16 +41,21 @@ import locale
 from mn2.utils import isReadable, is_atty, wait_listening, bit_convert, optional_list
 
 def start_mn2( mn ):
+    global print
     
     stderr = Console(stderr=True)
+    console = Console()
+
+    print = console.print
+    builtins.print = console.print
 
     if locale.getpreferredencoding() != "UTF-8":
-        print("Warning: your locale is not set to UTF-8, this may cause issues with mn2. Trying to override it...", console=stderr)
+        console.print("Warning: your locale is not set to UTF-8, this may cause issues with mn2. Trying to override it...", console=stderr)
         try:
             locale.setlocale(locale.getlocale()[0], "UTF-8")
-            print("Locale overriden successfully", console=stderr)
+            console.print("Locale overriden successfully", console=stderr)
         except locale.Error:
-            print("Warning: failed to override locale", console=stderr)
+            console.print("Warning: failed to override locale", console=stderr)
     
 
     
@@ -101,7 +108,7 @@ def start_mn2( mn ):
                         node.write(sys.stdin.read(1))
                     if isReadable(nodePoller):
                         data = node.monitor()
-                        print(data)
+                        console.print(data)
                     if not node.waiting:
                         break
                 except KeyboardInterrupt:
@@ -118,7 +125,7 @@ def start_mn2( mn ):
     @app.command()
     def help(ctx: typer.Context, command: Annotated[Optional[str], typer.Argument()] = None):
         """Get help on the CLI or a single command."""
-        print("\n Type 'command --help' or 'help <command>' for help on a specific command.")
+        console.print("\n Type 'command --help' or 'help <command>' for help on a specific command.")
         if not command:
             ctx.parent.get_help()
             return
@@ -136,7 +143,7 @@ def start_mn2( mn ):
             if not no_ip:
                 additional_info.append(mn[node].IP())
             table.add_row(node, *additional_info)
-        print(table)
+        console.print(table)
     
     @app.command(rich_help_panel="Topology")
     def ports():
@@ -147,7 +154,7 @@ def start_mn2( mn ):
             for intf in switch.intfList():
                 port = switch.ports[intf]
                 sw_tree.add(f"{intf}:{port}", style="green")
-        print(tree)
+        console.print(tree)
     
     @app.command(rich_help_panel="Topology")
     def net():
@@ -162,18 +169,18 @@ def start_mn2( mn ):
             node_tree = tree.add(str(node), style="cyan")
             for intf in mn[node].intfNames():
                 node_tree.add(intf, style="green")
-        print(tree)
+        console.print(tree)
     @app.command(rich_help_panel="Topology")
     def dump():
         """Dump node info"""
         for node in mn.values():
-            print(repr(node))
+            console.print(repr(node))
     
     @app.command(rich_help_panel="Topology")
     def links():
         """List links"""
         for link in mn.links:
-            print(link)
+            console.print(link)
     
     class LinkStatus(str, Enum):
         up = "up"
@@ -213,7 +220,7 @@ def start_mn2( mn ):
             result = eval(" ".join(expr), globals(), mn)
             if result is None:
                 return
-            print(result)
+            console.print(result)
         except Exception as e:
             stderr.print_exception(e)
 
@@ -402,7 +409,7 @@ def start_mn2( mn ):
                         bit_convert(int(client_values[-1]["transmitted"]) * 8, False, precision, format),
                         )
                 progress.update(client_progress, completed=True)
-        print(table)
+        console.print(table)
         server.sendInt()
         server.cmd("killall -9 iperf")
 
@@ -572,6 +579,7 @@ def start_mn2( mn ):
                             completer=merge_completers([TyperCompleter(), MnCompleter(), PathCompleter(file_filter=lambda s: s.endswith(".mn") or s.endswith(".mn2") or s.endswith(".txt"))], deduplicate=True)
                             )
     
+    pipe_regex = re.compile(r".*(?P<pipetype>>{1,2})\s*(?P<file>[^\s]*)")
 
     command = typer.main.get_command(app)
     def process_command(text: str):
@@ -582,6 +590,21 @@ def start_mn2( mn ):
             argv.append("")
         if argv[0] not in commands.commands.keys():
             argv.insert(0, "default")
+        
+        if text.count(">") >= 1:
+            try:
+                pipe_match = pipe_regex.match(text[text.rindex(">")-1:])
+            except ValueError:
+                return command(argv, standalone_mode=False)
+            target = Path(sanitize_filepath(pipe_match.group("file")))
+            try:
+                argv = split_arg_string(text[:text.rindex(pipe_match.group("pipetype"))])
+                with console.capture() as capture:
+                    return command(argv, standalone_mode=False)
+            finally:
+                mode = "w" if pipe_match.group("pipetype") == ">" else "a"
+                with target.open(mode) as f:
+                    f.write(capture.get() + "\n")
         return command(argv, standalone_mode=False)
 
     while True:
