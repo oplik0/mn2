@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/oplik0/mn2/compare/v0.2.1...v0.2.2) (2023-10-23)
+
+
+### Bug Fixes
+
+* startup issue ([9c002ea](https://github.com/oplik0/mn2/commit/9c002ea14078ef2a25de0bae624318bcb4b641a5))
+
 ## [0.2.1](https://github.com/oplik0/mn2/compare/v0.2.0...v0.2.1) (2023-10-23)
 
 
