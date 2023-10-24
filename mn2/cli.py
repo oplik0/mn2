@@ -1,3 +1,4 @@
+from datetime import datetime
 from turtle import st
 from prompt_toolkit import PromptSession
 from prompt_toolkit.document import Document
@@ -30,6 +31,8 @@ import time
 import errno
 from pathvalidate import sanitize_filepath
 import builtins
+import threading
+from concurrent.futures import ThreadPoolExecutor
 sleep = time.sleep
 
 from mininet.node import Node
@@ -313,6 +316,8 @@ def start_mn2( mn ):
             return self.score
 
     
+
+
     def run_iperf(
             server: Node,
             clients: List[Node],
@@ -331,14 +336,15 @@ def start_mn2( mn ):
             tos: int,
             ttl: int,
             file: Path,
-            precision: int
+            precision: int,
+            parallel: bool,
     ):
         if server.waiting:
             server.sendInt()
             server.monitor(timeoutms=100)
         server.cmd("killall -9 iperf")
-        iperf_server_cmd = f"iperf -y C --sum-only -s -p {port} --len {length}{' -u' if udp else ''} &"
-        iperf_client_cmd = f"iperf -y C --sum-only -c {server.IP()} -p {port} -t {time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''}"
+        iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) if length else ''}{' -u' if udp else ''}"
+        iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''}"
         
         table = Table(title="iperf results", expand=True)
         table.add_column("Client", justify="left", style="cyan")
@@ -356,62 +362,97 @@ def start_mn2( mn ):
             table.add_column("Loss", justify="left", style="red")
             table.add_column("Out of order", justify="left", style="red")
 
-        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), TimeElapsedColumn(), transient=True) as progress:
-            server_progress = progress.add_task("Starting iperf server", total=True)
-            server.sendCmd(iperf_server_cmd)
 
-            iperf_fieldnames = ["date", "client_ip", "client_port", "server_ip", "server_port", "process_bumber", "interval", "transmitted", "rate", "jitter", "lost", "sent", "loss", "out of order"]
-            for client in clients:
-                if not udp and not wait_listening(client, server.IP(), port):
-                    raise Exception("iperf server failed to start")
+        listening = threading.Barrier(len(clients) + 1 if parallel else 2, timeout=20)
+        finished = threading.Barrier(len(clients) + 1 if parallel else 2, timeout=time+10 if parallel else time*len(clients)+10)
+        
+        iperf_fieldnames = ["date", "client_ip", "client_port", "server_ip", "server_port", "process_number", "interval", "transmitted", "rate", "jitter", "lost", "sent", "loss", "out of order"]
+
+        def logtofile(txt):
+            with open("log.txt", "a") as f:
+                f.write(str(datetime.now()) +  txt)
+
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), TimeElapsedColumn(), transient=True) as progress:
+            def server_thread():
+                server_progress = progress.add_task("Starting iperf server", total=True)
+                server.sendCmd(iperf_server_cmd)
+                listening.wait()
                 progress.update(server_progress, completed=True, description=f"Started iperf server on {server.name}")
-                client_progress = progress.add_task(f"Running iperf client on {client.name}", total=True)
-                cliout = client.cmd(iperf_client_cmd)
-                client_csv = [line for line in cliout.strip().split("\n") if line.count(",")>=4]
+                finished.wait()
+                server_values = {}
+                data = ""
+                while len(server_values) != len(clients):
+                    data += server.monitor(5000)
+                    server_csv = [line for line in data.strip().split("\n") if line.count(",")>=4]
+                    server_reader = csv.DictReader(server_csv, fieldnames=iperf_fieldnames)
+                    server_values = {**server_values, **{row["server_ip"] : row for row in server_reader if int(row.get("rate", "0")) > 0}}
+                for value in server_values.values():
+                    if value["client_ip"] == server.IP():
+                        value["client_ip"], value["server_ip"] = value["server_ip"], value["client_ip"]
+                        value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
+                return server_values
+
+            def node_thread(client: Node, last = False):
+                client_progress = progress.add_task(f"Preparing to run iperf client on {client.name}", total=True)
+                if not udp and not wait_listening(client, server.IP(), port):
+                    listening.abort()
+                    raise Exception("iperf server failed to start")
+                if listening.n_waiting != 0:
+                    listening.wait()
+                client.sendCmd(iperf_client_cmd)
+                progress.update(client_progress, description=f"Running iperf client on {client.name}")
+                data = client.waitOutput()
+                progress.update(client_progress, completed=True, description=f"Finished running iperf client on {client.name}")
+                if parallel or last:
+                    finished.wait()
+                client_csv = [line for line in data.strip().split("\n") if line.count(",")>=4]
                 client_reader = csv.DictReader(client_csv, fieldnames=iperf_fieldnames)
                 client_values = [row for row in client_reader]
-                while True:
-                    serverout = server.monitor(timeoutms=5000)
-                    server_csv = [line for line in serverout.strip().split("\n") if line.count(",")>=4]
-                    server_reader = csv.DictReader(server_csv, fieldnames=iperf_fieldnames)
-                    server_values = [row for row in server_reader]
-                    for value in server_values:
-                        if value["client_ip"] == server.IP():
-                            value["client_ip"], value["server_ip"] = value["server_ip"], value["client_ip"]
-                            value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
-                    if len(server_values) and int(server_values[-1]["rate"]) > 0:
-                        break
-                if udp or bandwidth:
-                    table.add_row(
-                        client.name, 
-                        client.IP(),
-                        server.name,
-                        server.IP(), 
-                        client_values[-1]["interval"] + "s",
-                        bit_convert(int(server_values[-1]["rate"]), True, precision, format),
-                        bit_convert(int(client_values[-1]["rate"]), True, precision, format),
-                        bit_convert(int(client_values[-1]["transmitted"])*8, False, precision, format),
-                        f"{float(server_values[-1]['jitter']):.2f}ms" if client_values[-1]["jitter"] != None else None,
-                        client_values[-1]["sent"],
-                        str(int(client_values[-1]["sent"]) - int(client_values[-1]["lost"])),
-                        f"{float(client_values[-1]['loss']):.2f}%",
-                        client_values[-1]["out of order"],
-                        )
-                else:
-                    table.add_row(
-                        client.name, 
-                        client.IP(),
-                        server.name,
-                        server.IP(), 
-                        client_values[-1]["interval"] + "s",
-                        bit_convert(int(server_values[-1]["rate"]), True, precision, format),
-                        bit_convert(int(client_values[-1]["rate"]), True, precision, format),
-                        bit_convert(int(client_values[-1]["transmitted"]) * 8, False, precision, format),
-                        )
-                progress.update(client_progress, completed=True)
+                if len(client_values):
+                    return client_values[-1]
+            with ThreadPoolExecutor(max_workers=len(clients) + 1 if parallel else 2) as executor:
+                server_future = executor.submit(server_thread)
+                client_futures = [executor.submit(node_thread, client, index + 1 == len(clients)) for index, client in enumerate(clients)]
+                client_values = {value["client_ip"] : value for value in [future.result() for future in client_futures]}
+                server_values = server_future.result()
+        clientips = [client.IP() for client in clients]
+        for ip in client_values.keys():
+            if ip not in server_values:
+                server_values[ip] = {}
+
+            client = clients[clientips.index(ip)]
+            client_value = client_values[ip]
+            server_value = server_values[ip]
+
+            if udp or bandwidth:
+                table.add_row(
+                    client.name, 
+                    client.IP(),
+                    server.name,
+                    server.IP(), 
+                    client_value["interval"] + "s",
+                    bit_convert(int(server_value["rate"]), True, precision, format),
+                    bit_convert(int(client_value["rate"]), True, precision, format),
+                    bit_convert(int(client_value["transmitted"])*8, False, precision, format),
+                    f"{float(server_values['jitter']):.2f}ms" if client_value["jitter"] != None else None,
+                    client_value["sent"],
+                    str(int(client_value["sent"]) - int(client_value["lost"])),
+                    f"{float(client_value['loss']):.2f}%",
+                    client_value["out of order"],
+                    )
+            else:
+                table.add_row(
+                    client.name, 
+                    client.IP(),
+                    server.name,
+                    server.IP(), 
+                    client_value["interval"] + "s",
+                    bit_convert(int(server_value["rate"]), True, precision, format),
+                    bit_convert(int(client_value["rate"]), True, precision, format),
+                    bit_convert(int(client_value["transmitted"]) * 8, False, precision, format),
+                    )
         console.print(table)
         server.sendInt()
-        server.cmd("killall -9 iperf")
 
     unit_regex = re.compile(r"(?P<value>\d+)\s*(?P<unit>[kKmMgG]?i?)(?P<byte>[bB]?).*")
     units = {
@@ -453,11 +494,17 @@ def start_mn2( mn ):
         ttl: Annotated[int, typer.Option("--ttl", help="Set the IP TTL field")]=None,
         file: Annotated[Path, typer.Option("--file", "-F", help="Use a file as a representative stream for measuring bandwidth", autocompletion=file_completion)]=None,
         precision: Annotated[int, typer.Option("--precision", help="Number of decimal places to print (only really useful for fast links)")]=2,
+        parallel: Annotated[bool, typer.Option("--parallel", "-P", help="Run iperf in parallel on all clients")]=False,
         ):
         """Run iperf between hosts."""
         tos = tos_custom or (int(tos) if tos else None)
-        run_iperf(server, clients, port, format, length, udp, window, mss, nodelay, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision)
-
+        try:
+            run_iperf(server, clients, port, format, length, udp, window, mss, nodelay, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel)
+        finally:
+            try:
+                server.cmd("killall -9 iperf")
+            except:
+                pass
     @app.command(rich_help_panel="Testing utilities")
     def iperfudp(
         server: Annotated[Node, typer.Argument(help="Server to run iperf on",  parser=mn_node)], 
@@ -475,11 +522,17 @@ def start_mn2( mn ):
         ttl: Annotated[int, typer.Option("--ttl", help="Set the IP TTL field")]=None,
         file: Annotated[Path, typer.Option("--file", "-F", help="Use a file as a representative stream for measuring bandwidth")]=None,
         precision: Annotated[int, typer.Option("--precision", help="Number of decimal places to print (only really useful for fast links)")]=2,
+        parallel: Annotated[bool, typer.Option("--parallel", "-P", help="Run iperf in parallel on all clients")]=False,
         ):
         """Run iperf between hosts using UDP (can also be achieved by using iperf -u)."""
         tos = tos_custom or (int(tos) if tos else None)
-        run_iperf(server, clients, port, format, length, True, None, None, None, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision)
-
+        try:
+            run_iperf(server, clients, port, format, length, True, None, None, None, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel)
+        finally:
+            try:
+                server.cmd("killall -9 iperf")
+            except:
+                pass
     @app.command(rich_help_panel="Node connections")
     def xterm(nodes: Annotated[List[Node], typer.Argument(help="Nodes to spawn xterm for", parser=mn_node)], term: Annotated[str, typer.Option("--term", "-t", help="Terminal type (xterm, xterm-color, gnome-terminal, ...)")]="xterm"):
         """Spawn xterm for given node(s)"""
@@ -567,7 +620,7 @@ def start_mn2( mn ):
                                          start_position=-overlap(document.text_before_cursor, key),
                                          display_meta=f"Mininet {mn[key].__class__.__name__} {mn[key].name}"
                                          )
-            
+
     app_dir = Path(typer.get_app_dir("mn2"))
     history_file = app_dir / ".history"
     if not app_dir.exists():
