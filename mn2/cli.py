@@ -328,7 +328,7 @@ def start_mn2( mn ):
             window: int,
             mss: int,
             nodelay: bool,
-            time: int,
+            iperf_time: int,
             bandwidth: str,
             dualtest: bool,
             num: int,
@@ -344,7 +344,7 @@ def start_mn2( mn ):
             server.monitor(timeoutms=100)
         server.cmd("killall -9 iperf")
         iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) if length else ''}{' -u' if udp else ''}"
-        iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''}"
+        iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {iperf_time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''}"
         
         table = Table(title="iperf results", expand=True)
         table.add_column("Client", justify="left", style="cyan")
@@ -364,7 +364,7 @@ def start_mn2( mn ):
 
 
         listening = threading.Barrier(len(clients) + 1 if parallel else 2, timeout=20)
-        finished = threading.Barrier(len(clients) + 1 if parallel else 2, timeout=time+10 if parallel else time*len(clients)+10)
+        finished = threading.Barrier(len(clients) + 1 if parallel else 2, timeout=iperf_time+10 if parallel else iperf_time*len(clients)+10)
         
         iperf_fieldnames = ["date", "client_ip", "client_port", "server_ip", "server_port", "process_number", "interval", "transmitted", "rate", "jitter", "lost", "sent", "loss", "out of order"]
 
@@ -381,7 +381,8 @@ def start_mn2( mn ):
                 finished.wait()
                 server_values = {}
                 data = ""
-                while len(server_values) != len(clients):
+                timeout_start = time.time()
+                while len(server_values) != len(clients) and time.time() - timeout_start < 20:
                     data += server.monitor(5000)
                     server_csv = [line for line in data.strip().split("\n") if line.count(",")>=4]
                     server_reader = csv.DictReader(server_csv, fieldnames=iperf_fieldnames)
@@ -408,6 +409,10 @@ def start_mn2( mn ):
                 client_csv = [line for line in data.strip().split("\n") if line.count(",")>=4]
                 client_reader = csv.DictReader(client_csv, fieldnames=iperf_fieldnames)
                 client_values = [row for row in client_reader]
+                for value in client_values:
+                    if value["client_ip"] == server.IP():
+                        value["client_ip"], value["server_ip"] = value["server_ip"], value["client_ip"]
+                        value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
                 if len(client_values):
                     return client_values[-1]
             with ThreadPoolExecutor(max_workers=len(clients) + 1 if parallel else 2) as executor:
@@ -418,7 +423,12 @@ def start_mn2( mn ):
         clientips = [client.IP() for client in clients]
         for ip in client_values.keys():
             if ip not in server_values:
-                server_values[ip] = {}
+                server_values[ip] = {                   
+                    "rate": 0,
+                    "jitter": 0,
+                    "loss": 0,
+                    "out of order": 0,
+                }
 
             client = clients[clientips.index(ip)]
             client_value = client_values[ip]
@@ -434,7 +444,7 @@ def start_mn2( mn ):
                     bit_convert(int(server_value["rate"]), True, precision, format),
                     bit_convert(int(client_value["rate"]), True, precision, format),
                     bit_convert(int(client_value["transmitted"])*8, False, precision, format),
-                    f"{float(server_values['jitter']):.2f}ms" if client_value["jitter"] != None else None,
+                    f"{float(client_value['jitter']):.2f}ms" if client_value["jitter"] != None else None,
                     client_value["sent"],
                     str(int(client_value["sent"]) - int(client_value["lost"])),
                     f"{float(client_value['loss']):.2f}%",
