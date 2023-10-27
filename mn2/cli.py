@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.tree import Tree
 from rich.traceback import Traceback
+from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from subprocess import call
 from enum import Enum
@@ -41,26 +42,20 @@ from mininet.term import makeTerms, runX11
 
 import locale
 
-from mn2.utils import isReadable, is_atty, wait_listening, bit_convert, optional_list
+from mn2.utils import isReadable, is_atty, wait_listening, bit_convert, optional_list, timeout
 
 def start_mn2( mn ):
-    global print
     
     stderr = Console(stderr=True)
     console = Console()
 
-    print = console.print
-    builtins.print = console.print
-
     if locale.getpreferredencoding() != "UTF-8":
-        console.print("Warning: your locale is not set to UTF-8, this may cause issues with mn2. Trying to override it...", console=stderr)
+        stderr.print("Warning: your locale is not set to UTF-8, this may cause issues with mn2. Trying to override it...")
         try:
-            locale.setlocale(locale.getlocale()[0], "UTF-8")
-            console.print("Locale overriden successfully", console=stderr)
+            locale.setlocale(locale.LC_ALL, "UTF-8")
+            stderr.print("Locale overriden successfully")
         except locale.Error:
-            console.print("Warning: failed to override locale", console=stderr)
-    
-
+            stderr.print("Warning: failed to override locale. You might need to change your system locale (e.g. usinag `sudo localectl set-locale LANG=en_US.UTF-8`)")
     
     def mn_node(value: str):
         try:
@@ -193,7 +188,7 @@ def start_mn2( mn ):
     def link(end1: Annotated[str, typer.Argument(help="First node")], end2: Annotated[str, typer.Argument(help="Second node")], status: Annotated[LinkStatus, typer.Argument(help="Set link status")]):
         """Change the status of links between nodes"""
         mn.configLinkStatus(end1, end2, status)
-    
+
     class SwitchAction(str, Enum):
         start = "start"
         stop = "stop"
@@ -338,12 +333,16 @@ def start_mn2( mn ):
             file: Path,
             precision: int,
             parallel: bool,
+            simultaneous: bool,
+            fail_fast: bool,
+            retries: int = 3,
+            output: Path = None,
     ):
         if server.waiting:
             server.sendInt()
             server.monitor(timeoutms=100)
         server.cmd("killall -9 iperf")
-        iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) if length else ''}{' -u' if udp else ''}"
+        iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) if length else ''}{' -u' if udp or bandwidth else ''}"
         iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {iperf_time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''}"
         
         table = Table(title="iperf results", expand=True)
@@ -362,64 +361,71 @@ def start_mn2( mn ):
             table.add_column("Loss", justify="left", style="red")
             table.add_column("Out of order", justify="left", style="red")
 
+        listening = threading.Barrier(len(clients) + 1 if simultaneous else 2, timeout=20)
+        finished = threading.Barrier(len(clients) +1 if simultaneous else 2, timeout=iperf_time+10 if simultaneous else iperf_time*len(clients)+10)
 
-        listening = threading.Barrier(len(clients) + 1 if parallel else 2, timeout=20)
-        finished = threading.Barrier(len(clients) + 1 if parallel else 2, timeout=iperf_time+10 if parallel else iperf_time*len(clients)+10)
-        
         iperf_fieldnames = ["date", "client_ip", "client_port", "server_ip", "server_port", "process_number", "interval", "transmitted", "rate", "jitter", "lost", "sent", "loss", "out of order"]
+        try:
+            with timeout((iperf_time + 3) * (len(clients) if not simultaneous else 1)):
+                with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), TimeElapsedColumn(), transient=True) as progress:
+                    def server_thread():
+                        server_progress = progress.add_task("Starting iperf server", total=True)
+                        popen = server.popen(iperf_server_cmd, shell=True, text=True)
+                        listening.wait()
+                        progress.update(server_progress, completed=True, description=f"Started iperf server on {server.name}")
+                        server_values = {}
+                        data = ""
+                        results_progress = progress.add_task("Collecting results", total=len(clients))
+                        finished.wait()
+                        while len(server_values) < len(clients):
+                            progress.update(results_progress, description=f"Collecting results ({len(server_values)}/{len(clients)})")
+                            data += popen.stdout.readline()
+                            server_csv = [line for line in data.strip().split() if line.count(",")>=4]
+                            server_reader = csv.DictReader(server_csv, fieldnames=iperf_fieldnames)
+                            server_values = {**server_values, **{row["server_ip"] : row for row in server_reader if int(row.get("rate", "0")) > 0}}
+                        progress.update(results_progress, description="Finished collecting results")
+                        for value in server_values.values():
+                            if value["client_ip"] == server.IP():
+                                value["client_ip"], value["server_ip"] = value["server_ip"], value["client_ip"]
+                                value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
+                        return server_values
 
-        def logtofile(txt):
-            with open("log.txt", "a") as f:
-                f.write(str(datetime.now()) +  txt)
-
-        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), TimeElapsedColumn(), transient=True) as progress:
-            def server_thread():
-                server_progress = progress.add_task("Starting iperf server", total=True)
-                server.sendCmd(iperf_server_cmd)
-                listening.wait()
-                progress.update(server_progress, completed=True, description=f"Started iperf server on {server.name}")
-                finished.wait()
-                server_values = {}
-                data = ""
-                timeout_start = time.time()
-                while len(server_values) != len(clients) and time.time() - timeout_start < 20:
-                    data += server.monitor(5000)
-                    server_csv = [line for line in data.strip().split("\n") if line.count(",")>=4]
-                    server_reader = csv.DictReader(server_csv, fieldnames=iperf_fieldnames)
-                    server_values = {**server_values, **{row["server_ip"] : row for row in server_reader if int(row.get("rate", "0")) > 0}}
-                for value in server_values.values():
-                    if value["client_ip"] == server.IP():
-                        value["client_ip"], value["server_ip"] = value["server_ip"], value["client_ip"]
-                        value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
-                return server_values
-
-            def node_thread(client: Node, last = False):
-                client_progress = progress.add_task(f"Preparing to run iperf client on {client.name}", total=True)
-                if not udp and not wait_listening(client, server.IP(), port):
-                    listening.abort()
-                    raise Exception("iperf server failed to start")
-                if listening.n_waiting != 0:
-                    listening.wait()
-                client.sendCmd(iperf_client_cmd)
-                progress.update(client_progress, description=f"Running iperf client on {client.name}")
-                data = client.waitOutput()
-                progress.update(client_progress, completed=True, description=f"Finished running iperf client on {client.name}")
-                if parallel or last:
-                    finished.wait()
-                client_csv = [line for line in data.strip().split("\n") if line.count(",")>=4]
-                client_reader = csv.DictReader(client_csv, fieldnames=iperf_fieldnames)
-                client_values = [row for row in client_reader]
-                for value in client_values:
-                    if value["client_ip"] == server.IP():
-                        value["client_ip"], value["server_ip"] = value["server_ip"], value["client_ip"]
-                        value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
-                if len(client_values):
-                    return client_values[-1]
-            with ThreadPoolExecutor(max_workers=len(clients) + 1 if parallel else 2) as executor:
-                server_future = executor.submit(server_thread)
-                client_futures = [executor.submit(node_thread, client, index + 1 == len(clients)) for index, client in enumerate(clients)]
-                client_values = {value["client_ip"] : value for value in [future.result() for future in client_futures]}
-                server_values = server_future.result()
+                    def node_thread(client: Node, last = False):
+                        client_progress = progress.add_task(f"Preparing to run iperf client on {client.name}", total=True)
+                        if not udp and not wait_listening(client, server.IP(), port):
+                            listening.abort()
+                            raise Exception("iperf server failed to start")
+                        if listening.n_waiting != 0:
+                            listening.wait()
+                        client.sendCmd(iperf_client_cmd)
+                        progress.update(client_progress, description=f"Running iperf client on {client.name}")
+                        data = client.waitOutput()
+                        progress.update(client_progress, completed=True, description=f"Finished iperf client on {client.name}")
+                        if simultaneous or last:
+                            finished.wait()
+                        client_csv = [line for line in data.strip().split("\n") if line.count(",")>=4]
+                        client_reader = csv.DictReader(client_csv, fieldnames=iperf_fieldnames)
+                        client_values = [row for row in client_reader]
+                        for value in client_values:
+                            if value["client_ip"] == server.IP():
+                                value["client_ip"], value["server_ip"] = value["server_ip"], value["client_ip"]
+                                value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
+                        if len(client_values):
+                            return client_values[-1]
+                    with ThreadPoolExecutor(max_workers=len(clients) + 1 if simultaneous else 2) as executor:
+                        server_future = executor.submit(server_thread)
+                        while listening.n_waiting == 0:
+                            sleep(0.1)
+                        client_futures = [executor.submit(node_thread, client, index + 1 == len(clients)) for index, client in enumerate(clients)]
+                        client_values = {value["client_ip"] : value for value in [future.result() for future in client_futures]}
+                        server_values = server_future.result()
+        except TimeoutError:
+            if fail_fast or retries == 0:
+                raise
+            else:
+                pass
+        if not server_values:
+            return run_iperf(server, clients, port, format, length, udp, window, mss, nodelay, iperf_time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel, simultaneous, fail_fast, retries - 1) if retries else None
         clientips = [client.IP() for client in clients]
         for ip in client_values.keys():
             if ip not in server_values:
@@ -462,6 +468,18 @@ def start_mn2( mn ):
                     bit_convert(int(client_value["transmitted"]) * 8, False, precision, format),
                     )
         console.print(table)
+        if output is not None:
+            with Progress(SpinnerColumn(finished_text="[green]✓[/green]"), TextColumn("[progress.description]{task.description}"), TimeElapsedColumn(), transient=False) as progress:
+                write_task = progress.add_task(f"Writing results to {output}", total=True)
+                headers = [Text.from_markup(column.header) for column in table.columns]
+                columns = [[Text.from_markup(cell) for cell in column.cells] for column in table.columns]
+                rows = list(zip(*columns))
+                with output.open("w") as f:
+                    writer = csv.writer(f, )
+                    writer.writerow(headers)
+                    writer.writerows(rows)
+                progress.update(write_task, completed=True, description=f"Wrote results to [cyan]{output}[/cyan]")
+                
         server.sendInt()
 
     unit_regex = re.compile(r"(?P<value>\d+)\s*(?P<unit>[kKmMgG]?i?)(?P<byte>[bB]?).*")
@@ -504,12 +522,16 @@ def start_mn2( mn ):
         ttl: Annotated[int, typer.Option("--ttl", help="Set the IP TTL field")]=None,
         file: Annotated[Path, typer.Option("--file", "-F", help="Use a file as a representative stream for measuring bandwidth", autocompletion=file_completion)]=None,
         precision: Annotated[int, typer.Option("--precision", help="Number of decimal places to print (only really useful for fast links)")]=2,
-        parallel: Annotated[bool, typer.Option("--parallel", "-P", help="Run iperf in parallel on all clients")]=False,
+        parallel: Annotated[int, typer.Option("--parallel", "-P", help="Have each client make a set number of parallel connections")]=1,
+        simultaneous: Annotated[bool, typer.Option("--simultaneous", "-s", help="Run iperf on all clients at once")]=False,
+        fail_fast: Annotated[bool, typer.Option("--fail-fast", "-F", help="Stop iperf on failure without any retries")]=False,
+        retries: Annotated[int, typer.Option("--retries", "-R", help="Number of times to retry iperf on failure")]=3,
+        output: Annotated[Path, typer.Option("--output", "-o", help="Output file to write results to")]=None,
         ):
         """Run iperf between hosts."""
         tos = tos_custom or (int(tos) if tos else None)
         try:
-            run_iperf(server, clients, port, format, length, udp, window, mss, nodelay, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel)
+            run_iperf(server, clients, port, format, length, udp, window, mss, nodelay, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel, simultaneous, fail_fast, retries, output)
         finally:
             try:
                 server.cmd("killall -9 iperf")
@@ -532,12 +554,16 @@ def start_mn2( mn ):
         ttl: Annotated[int, typer.Option("--ttl", help="Set the IP TTL field")]=None,
         file: Annotated[Path, typer.Option("--file", "-F", help="Use a file as a representative stream for measuring bandwidth")]=None,
         precision: Annotated[int, typer.Option("--precision", help="Number of decimal places to print (only really useful for fast links)")]=2,
-        parallel: Annotated[bool, typer.Option("--parallel", "-P", help="Run iperf in parallel on all clients")]=False,
+        parallel: Annotated[int, typer.Option("--parallel", "-P", help="Have each client make a set number of parallel connections")]=1,
+        simultaneous: Annotated[bool, typer.Option("--simultaneous", "-s", help="Run iperf on all clients at once")]=False,
+        fail_fast: Annotated[bool, typer.Option("--fail-fast", "-F", help="Stop iperf on failure without any retries")]=False,
+        retries: Annotated[int, typer.Option("--retries", "-R", help="Number of times to retry iperf on failure")]=3,
+        output: Annotated[Path, typer.Option("--output", "-o", help="Output file to write results to")]=None,
         ):
         """Run iperf between hosts using UDP (can also be achieved by using iperf -u)."""
         tos = tos_custom or (int(tos) if tos else None)
         try:
-            run_iperf(server, clients, port, format, length, True, None, None, None, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel)
+            run_iperf(server, clients, port, format, length, True, None, None, None, time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel, simultaneous, fail_fast, retries, output)
         finally:
             try:
                 server.cmd("killall -9 iperf")
