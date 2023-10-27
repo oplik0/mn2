@@ -398,7 +398,7 @@ def start_mn2( mn ):
                         if listening.n_waiting != 0:
                             listening.wait()
                         client.sendCmd(iperf_client_cmd)
-                        progress.update(client_progress, description=f"Running iperf client on {client.name}")
+                        progress.update(client_progress, description=f"Running iperf client on {client.name}", )
                         data = client.waitOutput()
                         progress.update(client_progress, completed=True, description=f"Finished iperf client on {client.name}")
                         if simultaneous or last:
@@ -675,7 +675,7 @@ def start_mn2( mn ):
         if not len(text.strip()) or text.strip().startswith("#"):
             return
         argv = split_arg_string(text)
-        if argv[0] == "source" or len(argv) == 1:
+        if argv[0] == "source" or (len(argv) == 1 and argv[0] not in commands.commands.keys()):
             argv.append("")
         if argv[0] not in commands.commands.keys():
             argv.insert(0, "default")

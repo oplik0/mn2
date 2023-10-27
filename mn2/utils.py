@@ -38,11 +38,12 @@ def bit_convert(bits: int, ps: bool = False, precision: int = 2, format = None):
         return f"{bits} {'B' if bytes else 'b'}{'ps' if ps else ''}"
     elif format == "k" or unit_scale == 1:
         return f"{round(bits / (2**10), precision)} K{'B' if bytes else 'b'}{'ps' if ps else ''}"
-    elif format == "g" or unit_scale == 2:
+    elif format == "m" or unit_scale == 2:
         return f"{round(bits / (2**20), precision)} M{'B' if bytes else 'b'}{'ps' if ps else ''}"
-    elif unit_scale == 3:
+    elif format == "g" or unit_scale == 3:
         return f"{round(bits / (2**30), precision)} G{'B' if bytes else 'b'}{'ps' if ps else ''}"
-    
+    else:
+        return f"{round(bits / (2**40), precision)} T{'B' if bytes else 'b'}{'ps' if ps else ''}"
 def optional_list(value: Optional[List[str]]) -> List[str]:
     return value if value else []
 
