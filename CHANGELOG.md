@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/oplik0/mn2/compare/v0.3.0...v0.3.1) (2023-10-27)
+
+
+### Bug Fixes
+
+* format m/g mixup ([6677155](https://github.com/oplik0/mn2/commit/667715530220cedcf55de7c63568a99bc3fe1e43))
+
 ## [0.3.0](https://github.com/oplik0/mn2/compare/v0.2.2...v0.3.0) (2023-10-27)
 
 
