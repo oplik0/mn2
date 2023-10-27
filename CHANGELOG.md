@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/oplik0/mn2/compare/v0.2.2...v0.3.0) (2023-10-27)
+
+
+### Features
+
+* output redirection ([b44b4f5](https://github.com/oplik0/mn2/commit/b44b4f547ae133aaa6f29571cd74b2566b973765))
+* parallel iperf ([3982669](https://github.com/oplik0/mn2/commit/398266913dfba806118125fa663cfc7bdad65260))
+* pass non-keyword args as just args to source ([9702668](https://github.com/oplik0/mn2/commit/97026683b73260528fc7d6eca5f359535c66b194))
+
+
+### Bug Fixes
+
+* add iperf timeout and client-server swap on udp ([b9912b6](https://github.com/oplik0/mn2/commit/b9912b63eadd20e7875f3ad1200765d5d985f12a))
+* better error handling in source ([3f15d7d](https://github.com/oplik0/mn2/commit/3f15d7dcbea23e56abbd2328a410f5d4dcaae490))
+
 ## [0.2.2](https://github.com/oplik0/mn2/compare/v0.2.1...v0.2.2) (2023-10-23)
 
 
