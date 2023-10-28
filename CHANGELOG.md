@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0](https://github.com/oplik0/mn2/compare/v0.3.1...v0.4.0) (2023-10-28)
+
+
+### Features
+
+* send individual commands to different hosts ([1eb6488](https://github.com/oplik0/mn2/commit/1eb64883c42219a402c84503d64a99e823833410))
+
+
+### Bug Fixes
+
+* far more reliable udp iperf output ([b0dde0f](https://github.com/oplik0/mn2/commit/b0dde0fc805dade821a2ee333029560e5cd3b585))
+* only add length to server if dualtest or tradeoff are active ([52eabef](https://github.com/oplik0/mn2/commit/52eabefba11b88b9e0e3f7f59dfba35e53df573c))
+* remove some debugging remnants ([fadabf2](https://github.com/oplik0/mn2/commit/fadabf27a4a6b29038ca644b435be631980b07d4))
+* use separate ports for UDP ([583911c](https://github.com/oplik0/mn2/commit/583911c4803c9221e639d59d918b5e7d8fb806a3))
+
 ## [0.3.1](https://github.com/oplik0/mn2/compare/v0.3.0...v0.3.1) (2023-10-27)
 
 
