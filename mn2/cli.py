@@ -346,8 +346,8 @@ def start_mn2( mn ):
         if length == 8192:
             length = None
         server.cmd("killall -9 iperf")
-        iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) if length and (dualtest or tradeoff) else ''}{' -u' if udp or bandwidth else ''} {'-Z' + congestion if congestion else ''}"
-        iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {iperf_time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''} {'-P ' + str(parallel) if parallel else ''}  {'-Z' + congestion if congestion else ''}"
+        iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) + 'b' if length and (dualtest or tradeoff) else ''}{' -u' if udp or bandwidth else ''} {'-Z' + congestion if congestion else ''}"
+        iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {iperf_time} {'--len ' + str(length) + 'b' if length else ''} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''} {'-P ' + str(parallel) if parallel else ''}  {'-Z' + congestion if congestion else ''}"
         
         table = Table(title="iperf results", expand=True)
         table.add_column("Client", justify="left", style="cyan")
@@ -374,7 +374,10 @@ def start_mn2( mn ):
                 with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), TimeElapsedColumn(), transient=True) as progress:
                     def server_thread():
                         server_progress = progress.add_task("Starting iperf server", total=True)
-                        popen = server.popen(iperf_server_cmd, shell=True, text=True)
+                        if udp:
+                            popen = [server.popen(iperf_server_cmd + f'-p 600{i}', shell=True, text=True) for i,_ in enumerate(clients)]
+                        else:
+                            popen = server.popen(iperf_server_cmd, shell=True, text=True)
                         listening.wait()
                         progress.update(server_progress, completed=True, description=f"Started iperf server on {server.name}")
                         server_values = {}
@@ -384,7 +387,11 @@ def start_mn2( mn ):
                         start = time.time()
                         while len(server_values) < len(clients) and time.time() - start < (iperf_time * len(clients)) + 10:
                             progress.update(results_progress, description=f"Collecting results ({len(server_values)}/{len(clients)})")
-                            data += popen.stdout.readline()
+                            if udp:
+                                for popen_ in popen:
+                                    data += popen_.stdout.readline()
+                            else:
+                                data += popen.stdout.readline()
                             server_csv = [line for line in data.strip().split() if line.count(",")>=4]
                             server_reader = csv.DictReader(server_csv, fieldnames=iperf_fieldnames)
                             server_values = {**server_values, **{row["server_ip"] : row for row in server_reader if int(row.get("rate", "0")) > 0}}
@@ -405,6 +412,8 @@ def start_mn2( mn ):
                         cmd = iperf_client_cmd
                         if client.name in additional_args:
                             cmd += " " + additional_args[client.name]
+                        if udp:
+                            cmd += f' -p 600{clients.index(client)}'
                         client.sendCmd(cmd)
                         progress.update(client_progress, description=f"Running iperf client on {client.name}", )
                         data = client.waitOutput()
@@ -413,13 +422,13 @@ def start_mn2( mn ):
                             finished.wait()
                         client_csv = [line for line in data.strip().split("\n") if line.count(",")>=4]
                         client_reader = csv.DictReader(client_csv, fieldnames=iperf_fieldnames)
-                        client_values = [row for row in client_reader]
+                        client_values = [row for row in client_reader if int(row.get("rate", "0")) > 0]
                         for value in client_values:
                             if value["client_ip"] == server.IP():
                                 value["client_ip"], value["server_ip"] = value["server_ip"], value["client_ip"]
                                 value["client_port"], value["server_port"] = value["server_port"], value["client_port"]
                         if len(client_values):
-                            return client_values[-1]
+                            return client_values[0]
                     with ThreadPoolExecutor(max_workers=len(clients) + 1 if simultaneous else 2) as executor:
                         server_future = executor.submit(server_thread)
                         while listening.n_waiting == 0:
