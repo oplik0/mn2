@@ -385,7 +385,6 @@ def start_mn2( mn ):
                         while len(server_values) < len(clients) and time.time() - start < (iperf_time * len(clients)) + 10:
                             progress.update(results_progress, description=f"Collecting results ({len(server_values)}/{len(clients)})")
                             data += popen.stdout.readline()
-                            # progress.print(data)
                             server_csv = [line for line in data.strip().split() if line.count(",")>=4]
                             server_reader = csv.DictReader(server_csv, fieldnames=iperf_fieldnames)
                             server_values = {**server_values, **{row["server_ip"] : row for row in server_reader if int(row.get("rate", "0")) > 0}}
