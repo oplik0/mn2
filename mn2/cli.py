@@ -21,7 +21,7 @@ from rich.tree import Tree
 from rich.traceback import Traceback
 from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-from subprocess import call
+from subprocess import TimeoutExpired, call
 from enum import Enum
 from select import poll
 import select
@@ -343,6 +343,8 @@ def start_mn2( mn ):
         if server.waiting:
             server.sendInt()
             server.monitor(timeoutms=100)
+        if length == 8192:
+            length = None
         server.cmd("killall -9 iperf")
         iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) if length else ''}{' -u' if udp or bandwidth else ''} {'-Z' + congestion if congestion else ''}"
         iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {iperf_time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''} {'-P ' + str(parallel) if parallel else ''}  {'-Z' + congestion if congestion else ''}"
@@ -377,9 +379,10 @@ def start_mn2( mn ):
                         progress.update(server_progress, completed=True, description=f"Started iperf server on {server.name}")
                         server_values = {}
                         data = ""
-                        results_progress = progress.add_task("Collecting results", total=len(clients))
                         finished.wait()
-                        while len(server_values) < len(clients):
+                        results_progress = progress.add_task("Collecting results", total=len(clients))
+                        start = time.time()
+                        while len(server_values) < len(clients) and time.time() - start < (iperf_time * len(clients)) + 10:
                             progress.update(results_progress, description=f"Collecting results ({len(server_values)}/{len(clients)})")
                             data += popen.stdout.readline()
                             # progress.print(data)
@@ -432,7 +435,7 @@ def start_mn2( mn ):
             else:
                 pass
         if not server_values:
-            return run_iperf(server, clients, port, format, length, udp, window, mss, nodelay, iperf_time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel, simultaneous, fail_fast, retries - 1) if retries else None
+            return run_iperf(server, clients, port, format, length, udp, window, mss, nodelay, iperf_time, bandwidth, dualtest, num, tradeoff, tos, ttl, file, precision, parallel, simultaneous, fail_fast, retries - 1, output, congestion, additional_args) if retries else None
         clientips = [client.IP() for client in clients]
         for ip in client_values.keys():
             if ip not in server_values:
