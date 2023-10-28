@@ -346,7 +346,7 @@ def start_mn2( mn ):
         if length == 8192:
             length = None
         server.cmd("killall -9 iperf")
-        iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) if length else ''}{' -u' if udp or bandwidth else ''} {'-Z' + congestion if congestion else ''}"
+        iperf_server_cmd = f"iperf -y C -s -p {port} {'--len ' + str(length) if length and (dualtest or tradeoff) else ''}{' -u' if udp or bandwidth else ''} {'-Z' + congestion if congestion else ''}"
         iperf_client_cmd = f"iperf -y C -c {server.IP()} -p {port} -t {iperf_time} --len {length} {'-u' if udp or bandwidth else ''} {'--window ' + str(window) if window else ''} {'--mss ' + str(mss) if mss else ''} {'--nodelay' if nodelay else ''} {'--bandwidth ' + str(bandwidth) if bandwidth else ''} {'--dualtest' if dualtest else ''} {'--num ' + str(num) if num else ''} {'--tradeoff' if tradeoff else ''} {'--tos' + hex(tos) if tos else ''} {'--ttl ' + str(ttl) if ttl else ''} {'-F ' + str(file) if file else ''} {'-P ' + str(parallel) if parallel else ''}  {'-Z' + congestion if congestion else ''}"
         
         table = Table(title="iperf results", expand=True)
