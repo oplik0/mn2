@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/oplik0/mn2/compare/v0.4.1...v0.4.2) (2024-11-08)
+
+
+### Bug Fixes
+
+* don't minify in action ([fd8b0f3](https://github.com/oplik0/mn2/commit/fd8b0f3d8bcaa4715658b1181d5b19d7f5bb5094))
+
 ## [0.4.1](https://github.com/oplik0/mn2/compare/v0.4.0...v0.4.1) (2024-11-08)
 
 
