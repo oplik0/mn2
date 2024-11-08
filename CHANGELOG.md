@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/oplik0/mn2/compare/v0.4.0...v0.4.1) (2024-11-08)
+
+
+### Bug Fixes
+
+* **deps:** update dependency prompt-toolkit to v3.0.48 ([#19](https://github.com/oplik0/mn2/issues/19)) ([6f9ed52](https://github.com/oplik0/mn2/commit/6f9ed52f20b97e7c51469c3ea3617bbe65061ffb))
+
 ## [0.4.0](https://github.com/oplik0/mn2/compare/v0.3.1...v0.4.0) (2023-10-28)
 
 
