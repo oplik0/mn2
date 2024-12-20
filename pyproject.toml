@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mn2"
-version = "0.4.1"
+version = "0.4.0"
 description = "A script for replacing Mininet CLI with a better one"
 authors = ["oplik0 <opliko.reg@protonmail.com>"]
 readme = "README.md"
