@@ -17,7 +17,7 @@ mypy = "^1.6.0"
 ruff = "^0.1.0"
 toml = "^0.10.2"
 isort = "^5.12.0"
-pre-commit = "^3.5.0"
+pre-commit = "^4.0.0"
 python-minifier = "^2.9.0"
 stickytape = {git = "https://github.com/oplik0/stickytape.git"}
 
